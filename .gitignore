@@ -1,3 +1,80 @@
-build
-mx.scratch
-!.settings
+# Build outputs
+build/
+cmake-build-*/
+Debug/
+Release/
+out/
+bin/
+obj/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Makefile
+*.ninja
+.ninja_*
+
+# VSCode local settings
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/c_cpp_properties.json
+!.vscode/extensions.json
+
+# STM32CubeIDE / Eclipse files
+.metadata/
+.project
+.cproject
+.settings/
+*.launch
+
+# STM32CubeMX backup/generated temp files
+*.ioc.bak
+*.bak
+*.tmp
+*.log
+
+# Firmware outputs
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.lst
+*.su
+*.o
+*.obj
+*.a
+*.d
+*.dep
+
+# Debug / ST-Link / GDB
+*.svd
+*.gdb_history
+.stlink*
+JLinkLog.txt
+JLinkSettings.ini
+
+# Python / scripts cache
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Keep source and config
+!Core/
+!Drivers/
+!Middlewares/
+!CMakeLists.txt
+!CMakePresets.json
+!*.ioc
+!*.ld
+!startup_*.s
