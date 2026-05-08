@@ -1,43 +1,26 @@
-# Build outputs
+# Build directories
 build/
 cmake-build-*/
 Debug/
 Release/
+RelWithDebInfo/
+MinSizeRel/
 out/
 bin/
 obj/
 
-# CMake generated files
+# CMake / Ninja generated files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
 CTestTestfile.cmake
+Testing/
 Makefile
 *.ninja
 .ninja_*
 
-# VSCode local settings
-.vscode/*
-!.vscode/launch.json
-!.vscode/settings.json
-!.vscode/c_cpp_properties.json
-!.vscode/extensions.json
-
-# STM32CubeIDE / Eclipse files
-.metadata/
-.project
-.cproject
-.settings/
-*.launch
-
-# STM32CubeMX backup/generated temp files
-*.ioc.bak
-*.bak
-*.tmp
-*.log
-
-# Firmware outputs
+# Firmware and compiler outputs
 *.elf
 *.bin
 *.hex
@@ -50,17 +33,47 @@ Makefile
 *.a
 *.d
 *.dep
+*.gcda
+*.gcno
+*.gcov
 
-# Debug / ST-Link / GDB
+# STM32CubeIDE / Eclipse workspace files
+.metadata/
+.project
+.cproject
+.settings/
+*.launch
+
+# STM32CubeMX backups and generated temp files
+*.ioc.bak
+*.bak
+*.tmp
+*.log
+
+# VS Code local state
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/c_cpp_properties.json
+!.vscode/extensions.json
+
+# Language server / editor caches
+.cache/
+.clangd/index/
+*.idx
+
+# Debug probes / GDB
 *.svd
 *.gdb_history
 .stlink*
 JLinkLog.txt
 JLinkSettings.ini
 
-# Python / scripts cache
+# Python / helper script caches
 __pycache__/
-*.pyc
+*.py[cod]
+.python-version
 .venv/
 venv/
 
@@ -69,10 +82,11 @@ venv/
 Thumbs.db
 desktop.ini
 
-# Keep source and config
+# Keep project source and configuration tracked
 !Core/
 !Drivers/
 !Middlewares/
+!cmake/
 !CMakeLists.txt
 !CMakePresets.json
 !*.ioc
