@@ -1,7 +1,11 @@
 #include "spilink.h"
 
+#include <cstring>
+
 #include "main.h"
 #include "spi.h"
+#include "adc.h"
+#include "dac.h"
 
 namespace {
 
@@ -17,11 +21,19 @@ constexpr size_t kFrameSize = kFrameHeaderLen + kPayloadLen + kChecksumLen;
 constexpr uint32_t kTxPeriodMs = 100;
 constexpr uint32_t kSpiTimeoutMs = 100;
 
+// 你现在 RC 是 1k + 0.4uF，5ms 等待足够稳定。
+constexpr uint32_t kDacSettleDelayMs = 5;
+
 // 调试阶段先保留毫秒级 CS 时序。
-// 链路稳定后可改成微秒级或 NOP。
 constexpr uint32_t kCsIdleBeforeMs = 1;
 constexpr uint32_t kCsSetupMs = 1;
 constexpr uint32_t kCsHoldMs = 1;
+
+constexpr uint32_t kAdcBits = 8;
+constexpr uint32_t kTotalSamples = 256;
+constexpr uint32_t kFullScaleMv = 3300;
+constexpr uint32_t kMaxCode8 = 255;
+constexpr uint32_t kAdcAverageCount = 8;
 
 struct AdcTestStatus {
     uint32_t sample_index;
@@ -45,6 +57,16 @@ uint32_t g_tx_error_count = 0;
 uint32_t g_last_tx_tick = 0;
 HAL_StatusTypeDef g_last_spi_status = HAL_OK;
 
+// 简单统计量，先做 8-bit 静态测试。
+bool g_code_seen[256] = {};
+uint32_t g_missing_codes_last_full_scan = 0;
+int32_t g_offset_error_uv = 0;
+int32_t g_gain_error_ppm = 0;
+int32_t g_max_abs_inl_x1000 = 0;
+int32_t g_max_abs_dnl_x1000 = 0;
+uint32_t g_prev_adc_code = 0;
+bool g_has_prev_code = false;
+
 uint8_t Checksum8(const uint8_t *data, size_t len)
 {
     uint8_t checksum = 0;
@@ -67,45 +89,198 @@ void PutI32(uint8_t *buffer, size_t offset, int32_t value)
     PutU32(buffer, offset, static_cast<uint32_t>(value));
 }
 
-// 后续真实硬件到了，主要改这里。
-// 入口职责：
-// 1. 控制数控电压发生模块输出 input_mv
-// 2. 等待电压稳定
-// 3. 读取外部 ADC 或片内 ADC
-// 4. 更新静态参数估计值
+int32_t AbsI32(int32_t value)
+{
+    return value < 0 ? -value : value;
+}
+
+void EnableCycleCounter()
+{
+#if defined(DWT) && defined(CoreDebug)
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+#endif
+}
+
+uint32_t CyclesToNs(uint32_t cycles)
+{
+    const uint32_t hclk = HAL_RCC_GetHCLKFreq();
+    if (hclk == 0U) {
+        return 0;
+    }
+
+    return static_cast<uint32_t>(
+        (static_cast<uint64_t>(cycles) * 1000000000ULL) / hclk
+    );
+}
+
+void ResetStatsForNewScan()
+{
+    std::memset(g_code_seen, 0, sizeof(g_code_seen));
+    g_max_abs_inl_x1000 = 0;
+    g_max_abs_dnl_x1000 = 0;
+    g_prev_adc_code = 0;
+    g_has_prev_code = false;
+}
+
+void SetDacMv(uint32_t mv)
+{
+    if (mv > kFullScaleMv) {
+        mv = kFullScaleMv;
+    }
+
+    const uint32_t dac_code = (mv * 4095U + (kFullScaleMv / 2U)) / kFullScaleMv;
+
+    HAL_DAC_SetValue(
+        &hdac,
+        DAC_CHANNEL_1,
+        DAC_ALIGN_12B_R,
+        dac_code
+    );
+}
+
+uint32_t ReadAdc12Once(uint32_t *conversion_time_ns)
+{
+    if (conversion_time_ns != nullptr) {
+        *conversion_time_ns = 0;
+    }
+
+#if defined(DWT)
+    DWT->CYCCNT = 0;
+#endif
+
+    HAL_ADC_Start(&hadc1);
+
+    if (HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK) {
+        HAL_ADC_Stop(&hadc1);
+        return 0;
+    }
+
+    const uint32_t value = HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Stop(&hadc1);
+
+#if defined(DWT)
+    if (conversion_time_ns != nullptr) {
+        *conversion_time_ns = CyclesToNs(DWT->CYCCNT);
+    }
+#endif
+
+    return value;
+}
+
+uint32_t ReadAdc12Average(uint32_t *avg_conversion_time_ns)
+{
+    uint32_t sum = 0;
+    uint32_t time_sum_ns = 0;
+
+    for (uint32_t i = 0; i < kAdcAverageCount; ++i) {
+        uint32_t one_time_ns = 0;
+        sum += ReadAdc12Once(&one_time_ns);
+        time_sum_ns += one_time_ns;
+    }
+
+    if (avg_conversion_time_ns != nullptr) {
+        *avg_conversion_time_ns = time_sum_ns / kAdcAverageCount;
+    }
+
+    return sum / kAdcAverageCount;
+}
+
+uint32_t ConvertAdc12ToAdc8(uint32_t adc12)
+{
+    if (adc12 > 4095U) {
+        adc12 = 4095U;
+    }
+
+    return (adc12 * kMaxCode8 + 2047U) / 4095U;
+}
+
+uint32_t CountMissingCodes()
+{
+    uint32_t missing = 0;
+
+    for (uint32_t i = 0; i <= kMaxCode8; ++i) {
+        if (!g_code_seen[i]) {
+            ++missing;
+        }
+    }
+
+    return missing;
+}
+
+void UpdateStaticStats(uint32_t index, uint32_t adc_code, uint32_t conversion_time_ns, AdcTestStatus *s)
+{
+    if (index == 0U) {
+        ResetStatsForNewScan();
+    }
+
+    if (adc_code <= kMaxCode8) {
+        g_code_seen[adc_code] = true;
+    }
+
+    const int32_t ideal_code = static_cast<int32_t>(index);
+    const int32_t measured_code = static_cast<int32_t>(adc_code);
+    const int32_t code_error = measured_code - ideal_code;
+
+    const int32_t lsb_uv = static_cast<int32_t>((kFullScaleMv * 1000U) / kMaxCode8);
+
+    if (index == 0U) {
+        g_offset_error_uv = code_error * lsb_uv;
+    }
+
+    if (index == kMaxCode8) {
+        g_gain_error_ppm = (code_error * 1000000L) / static_cast<int32_t>(kMaxCode8);
+        g_missing_codes_last_full_scan = CountMissingCodes();
+    }
+
+    const int32_t inl_x1000 = code_error * 1000;
+    if (AbsI32(inl_x1000) > AbsI32(g_max_abs_inl_x1000)) {
+        g_max_abs_inl_x1000 = inl_x1000;
+    }
+
+    if (g_has_prev_code) {
+        const int32_t step = measured_code - static_cast<int32_t>(g_prev_adc_code);
+        const int32_t dnl_x1000 = (step - 1) * 1000;
+
+        if (AbsI32(dnl_x1000) > AbsI32(g_max_abs_dnl_x1000)) {
+            g_max_abs_dnl_x1000 = dnl_x1000;
+        }
+    }
+
+    g_prev_adc_code = adc_code;
+    g_has_prev_code = true;
+
+    s->offset_error_uv = g_offset_error_uv;
+    s->gain_error_ppm = g_gain_error_ppm;
+    s->inl_lsb_x1000 = g_max_abs_inl_x1000;
+    s->dnl_lsb_x1000 = g_max_abs_dnl_x1000;
+    s->missing_codes = g_missing_codes_last_full_scan;
+    s->conversion_time_ns = conversion_time_ns;
+}
+
 AdcTestStatus SpiLink_AcquireSample()
 {
     AdcTestStatus s = {};
 
-    constexpr uint32_t kAdcBits = 8;
-    constexpr uint32_t kTotalSamples = 256;
-    constexpr uint32_t kFullScaleMv = 5000;
-    constexpr uint32_t kMaxCode = (1U << kAdcBits) - 1U;
-
     const uint32_t index = g_sample_index % kTotalSamples;
     const uint32_t input_mv = (index * kFullScaleMv) / (kTotalSamples - 1U);
-    const uint32_t ideal_code = (input_mv * kMaxCode + kFullScaleMv / 2U) / kFullScaleMv;
 
-    // 当前为模拟数据：加入一点可见变化，便于验证 UI。
-    uint32_t simulated_code = ideal_code;
-    if ((index % 37U) == 0U && simulated_code < kMaxCode) {
-        simulated_code += 1U;
-    }
+    SetDacMv(input_mv);
+    HAL_Delay(kDacSettleDelayMs);
+
+    uint32_t conversion_time_ns = 0;
+    const uint32_t adc12 = ReadAdc12Average(&conversion_time_ns);
+    const uint32_t adc8 = ConvertAdc12ToAdc8(adc12);
 
     s.sample_index = index;
     s.total_samples = kTotalSamples;
     s.input_mv = input_mv;
-    s.adc_code = simulated_code;
+    s.adc_code = adc8;
     s.adc_bits = kAdcBits;
     s.progress_permille = (index * 1000U) / (kTotalSamples - 1U);
 
-    // 以下是模拟指标，后续替换成真实计算结果。
-    s.offset_error_uv = 1200;
-    s.gain_error_ppm = -350;
-    s.inl_lsb_x1000 = static_cast<int32_t>((index % 9U) * 120) - 480;
-    s.dnl_lsb_x1000 = static_cast<int32_t>((index % 7U) * 90) - 270;
-    s.missing_codes = (index > 180U) ? 1U : 0U;
-    s.conversion_time_ns = 6200;
+    UpdateStaticStats(index, adc8, conversion_time_ns, &s);
 
     ++g_sample_index;
     if (g_sample_index >= kTotalSamples) {
@@ -192,10 +367,16 @@ void SpiLink_Init(void)
 {
     CsHigh();
 
+    HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+    EnableCycleCounter();
+
     g_sample_index = 0;
     g_tx_error_count = 0;
     g_last_tx_tick = HAL_GetTick();
     g_last_spi_status = HAL_OK;
+
+    SetDacMv(0);
+    ResetStatsForNewScan();
 }
 
 void SpiLink_Task(void)

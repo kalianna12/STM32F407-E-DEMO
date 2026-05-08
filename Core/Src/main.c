@@ -18,6 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
+#include "dac.h"
 #include "spi.h"
 #include "gpio.h"
 
@@ -89,7 +91,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI2_Init();
+  MX_ADC1_Init();
+  MX_DAC_Init();
   /* USER CODE BEGIN 2 */
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
   SpiLink_Init();
 
   /* USER CODE END 2 */
