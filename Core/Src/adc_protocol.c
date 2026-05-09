@@ -1,0 +1,67 @@
+#include "adc_protocol.h"
+
+#define ADC_PROTOCOL_MAGIC0 0xA5U
+#define ADC_PROTOCOL_MAGIC1 0x5AU
+#define ADC_PROTOCOL_TYPE_ADC_STATUS 0x10U
+#define ADC_PROTOCOL_PAYLOAD_LEN 48U
+#define ADC_PROTOCOL_HEADER_LEN 4U
+
+static uint8_t Checksum8(const uint8_t *data, size_t len)
+{
+    uint8_t checksum = 0U;
+
+    for (size_t i = 0U; i < len; ++i) {
+        checksum ^= data[i];
+    }
+
+    return checksum;
+}
+
+static void PutU32(uint8_t *buffer, size_t offset, uint32_t value)
+{
+    buffer[offset + 0U] = (uint8_t)((value >> 0U) & 0xFFU);
+    buffer[offset + 1U] = (uint8_t)((value >> 8U) & 0xFFU);
+    buffer[offset + 2U] = (uint8_t)((value >> 16U) & 0xFFU);
+    buffer[offset + 3U] = (uint8_t)((value >> 24U) & 0xFFU);
+}
+
+static void PutI32(uint8_t *buffer, size_t offset, int32_t value)
+{
+    PutU32(buffer, offset, (uint32_t)value);
+}
+
+bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
+                                  uint8_t *frame,
+                                  size_t frame_len)
+{
+    if ((status == NULL) || (frame == NULL) || (frame_len < ADC_PROTOCOL_FRAME_SIZE)) {
+        return false;
+    }
+
+    frame[0] = ADC_PROTOCOL_MAGIC0;
+    frame[1] = ADC_PROTOCOL_MAGIC1;
+    frame[2] = ADC_PROTOCOL_TYPE_ADC_STATUS;
+    frame[3] = ADC_PROTOCOL_PAYLOAD_LEN;
+
+    size_t o = ADC_PROTOCOL_HEADER_LEN;
+
+    PutU32(frame, o, status->sample_index);       o += 4U;
+    PutU32(frame, o, status->total_samples);      o += 4U;
+    PutU32(frame, o, status->input_mv);           o += 4U;
+    PutU32(frame, o, status->adc_code);           o += 4U;
+    PutU32(frame, o, status->adc_bits);           o += 4U;
+    PutU32(frame, o, status->progress_permille);  o += 4U;
+
+    PutI32(frame, o, status->offset_error_uv);    o += 4U;
+    PutI32(frame, o, status->gain_error_ppm);     o += 4U;
+    PutI32(frame, o, status->inl_lsb_x1000);      o += 4U;
+    PutI32(frame, o, status->dnl_lsb_x1000);      o += 4U;
+
+    PutU32(frame, o, status->missing_codes);      o += 4U;
+    PutU32(frame, o, status->conversion_time_ns); o += 4U;
+
+    frame[ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN] =
+        Checksum8(frame, ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN);
+
+    return true;
+}
