@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/adc_static_calc.c
     Core/Src/adc_test_runner.c
     Core/Src/adc_protocol.c
+    Core/Src/stm32_adc_monitor.c
 )
 
 # Add include paths

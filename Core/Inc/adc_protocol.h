@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define ADC_PROTOCOL_FRAME_SIZE 53U
+#define ADC_PROTOCOL_FRAME_SIZE 117U
 
 bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
                                   uint8_t *frame,

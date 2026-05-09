@@ -57,6 +57,14 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define ADC0832_CS_Pin GPIO_PIN_0
+#define ADC0832_CS_GPIO_Port GPIOC
+#define ADC0832_CLK_Pin GPIO_PIN_1
+#define ADC0832_CLK_GPIO_Port GPIOC
+#define ADC0832_DI_Pin GPIO_PIN_2
+#define ADC0832_DI_GPIO_Port GPIOC
+#define ADC0832_DO_Pin GPIO_PIN_3
+#define ADC0832_DO_GPIO_Port GPIOC
 #define LED1_Pin GPIO_PIN_7
 #define LED1_GPIO_Port GPIOE
 #define SPI2_CS_Pin GPIO_PIN_12

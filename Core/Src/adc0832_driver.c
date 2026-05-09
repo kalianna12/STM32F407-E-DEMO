@@ -1,9 +1,10 @@
 #include "adc0832_driver.h"
 
-#include "adc.h"
 #include "main.h"
 
-#define ADC0832_COMPAT_AVERAGE_COUNT 8U
+#define ADC0832_CH0 0U
+#define ADC0832_CH1 1U
+#define ADC0832_CLOCK_DELAY_CYCLES 12U
 
 static uint32_t CyclesToNs(uint32_t cycles)
 {
@@ -15,46 +16,69 @@ static uint32_t CyclesToNs(uint32_t cycles)
     return (uint32_t)(((uint64_t)cycles * 1000000000ULL) / hclk);
 }
 
-static uint32_t ReadAdc12Once(uint32_t *conversion_time_ns)
+static void DelayShort(void)
 {
-    if (conversion_time_ns != NULL) {
-        *conversion_time_ns = 0U;
+    for (volatile uint32_t i = 0U; i < ADC0832_CLOCK_DELAY_CYCLES; ++i) {
+        __NOP();
     }
-
-#if defined(DWT)
-    DWT->CYCCNT = 0U;
-#endif
-
-    HAL_ADC_Start(&hadc1);
-
-    if (HAL_ADC_PollForConversion(&hadc1, 10U) != HAL_OK) {
-        HAL_ADC_Stop(&hadc1);
-        return 0U;
-    }
-
-    const uint32_t value = HAL_ADC_GetValue(&hadc1);
-    HAL_ADC_Stop(&hadc1);
-
-#if defined(DWT)
-    if (conversion_time_ns != NULL) {
-        *conversion_time_ns = CyclesToNs(DWT->CYCCNT);
-    }
-#endif
-
-    return value;
 }
 
-static uint32_t ConvertAdc12ToAdc8(uint32_t adc12)
+static void CsHigh(void)
 {
-    if (adc12 > 4095U) {
-        adc12 = 4095U;
-    }
+    HAL_GPIO_WritePin(ADC0832_CS_GPIO_Port, ADC0832_CS_Pin, GPIO_PIN_SET);
+}
 
-    return (adc12 * 255U + 2047U) / 4095U;
+static void CsLow(void)
+{
+    HAL_GPIO_WritePin(ADC0832_CS_GPIO_Port, ADC0832_CS_Pin, GPIO_PIN_RESET);
+}
+
+static void ClkHigh(void)
+{
+    HAL_GPIO_WritePin(ADC0832_CLK_GPIO_Port, ADC0832_CLK_Pin, GPIO_PIN_SET);
+}
+
+static void ClkLow(void)
+{
+    HAL_GPIO_WritePin(ADC0832_CLK_GPIO_Port, ADC0832_CLK_Pin, GPIO_PIN_RESET);
+}
+
+static void DiWrite(GPIO_PinState state)
+{
+    HAL_GPIO_WritePin(ADC0832_DI_GPIO_Port, ADC0832_DI_Pin, state);
+}
+
+static uint32_t DoRead(void)
+{
+    return (HAL_GPIO_ReadPin(ADC0832_DO_GPIO_Port, ADC0832_DO_Pin) == GPIO_PIN_SET) ? 1U : 0U;
+}
+
+static void ClockControlBit(uint32_t bit)
+{
+    DiWrite(bit ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    DelayShort();
+    ClkHigh();
+    DelayShort();
+    ClkLow();
+    DelayShort();
+}
+
+static uint32_t ClockReadBit(void)
+{
+    ClkHigh();
+    DelayShort();
+    const uint32_t bit = DoRead();
+    ClkLow();
+    DelayShort();
+    return bit;
 }
 
 void Adc0832Driver_Init(void)
 {
+    CsHigh();
+    ClkLow();
+    DiWrite(GPIO_PIN_RESET);
+
 #if defined(DWT) && defined(CoreDebug)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0U;
@@ -62,26 +86,63 @@ void Adc0832Driver_Init(void)
 #endif
 }
 
-bool Adc0832Driver_ReadCh0(uint32_t *raw_code, uint32_t *conversion_time_ns)
+bool Adc0832Driver_ReadChannel(uint32_t channel,
+                               uint32_t *raw_code,
+                               uint32_t *conversion_time_ns)
 {
     if (raw_code == NULL) {
         return false;
     }
 
-    uint32_t sum = 0U;
-    uint32_t time_sum_ns = 0U;
-
-    for (uint32_t i = 0U; i < ADC0832_COMPAT_AVERAGE_COUNT; ++i) {
-        uint32_t one_time_ns = 0U;
-        sum += ReadAdc12Once(&one_time_ns);
-        time_sum_ns += one_time_ns;
-    }
-
-    *raw_code = ConvertAdc12ToAdc8(sum / ADC0832_COMPAT_AVERAGE_COUNT);
-
     if (conversion_time_ns != NULL) {
-        *conversion_time_ns = time_sum_ns / ADC0832_COMPAT_AVERAGE_COUNT;
+        *conversion_time_ns = 0U;
     }
+
+    if ((channel != ADC0832_CH0) && (channel != ADC0832_CH1)) {
+        return false;
+    }
+
+    ClkLow();
+    DiWrite(GPIO_PIN_RESET);
+
+#if defined(DWT)
+    DWT->CYCCNT = 0U;
+#endif
+
+    CsLow();
+    DelayShort();
+
+    ClockControlBit(1U);
+    ClockControlBit(1U);
+    ClockControlBit(channel);
+    ClockControlBit(1U);
+
+    uint32_t value = 0U;
+    for (uint32_t i = 0U; i < 8U; ++i) {
+        value = (value << 1U) | ClockReadBit();
+    }
+
+    CsHigh();
+    DiWrite(GPIO_PIN_RESET);
+    ClkLow();
+
+#if defined(DWT)
+    if (conversion_time_ns != NULL) {
+        *conversion_time_ns = CyclesToNs(DWT->CYCCNT);
+    }
+#endif
+
+    *raw_code = value & 0xFFU;
 
     return true;
+}
+
+bool Adc0832Driver_ReadCh0(uint32_t *raw_code, uint32_t *conversion_time_ns)
+{
+    return Adc0832Driver_ReadChannel(ADC0832_CH0, raw_code, conversion_time_ns);
+}
+
+bool Adc0832Driver_ReadCh1(uint32_t *raw_code, uint32_t *conversion_time_ns)
+{
+    return Adc0832Driver_ReadChannel(ADC0832_CH1, raw_code, conversion_time_ns);
 }

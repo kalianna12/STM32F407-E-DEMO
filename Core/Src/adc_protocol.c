@@ -3,7 +3,7 @@
 #define ADC_PROTOCOL_MAGIC0 0xA5U
 #define ADC_PROTOCOL_MAGIC1 0x5AU
 #define ADC_PROTOCOL_TYPE_ADC_STATUS 0x10U
-#define ADC_PROTOCOL_PAYLOAD_LEN 48U
+#define ADC_PROTOCOL_PAYLOAD_LEN 112U
 #define ADC_PROTOCOL_HEADER_LEN 4U
 
 static uint8_t Checksum8(const uint8_t *data, size_t len)
@@ -45,20 +45,39 @@ bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
 
     size_t o = ADC_PROTOCOL_HEADER_LEN;
 
+    PutU32(frame, o, status->state);             o += 4U;
+    PutU32(frame, o, status->mode);              o += 4U;
+    PutU32(frame, o, status->source);            o += 4U;
+    PutU32(frame, o, status->monitor_ok);        o += 4U;
+    PutU32(frame, o, status->progress_permille); o += 4U;
+    PutU32(frame, o, status->elapsed_ms);        o += 4U;
+
     PutU32(frame, o, status->sample_index);       o += 4U;
     PutU32(frame, o, status->total_samples);      o += 4U;
+
+    PutU32(frame, o, status->dut_adc_code);       o += 4U;
+    PutU32(frame, o, status->dut_adc_bits);       o += 4U;
+    PutU32(frame, o, status->dut_adc_avg_x1000);  o += 4U;
+    PutU32(frame, o, status->dut_conversion_time_ns); o += 4U;
+
     PutU32(frame, o, status->input_mv);           o += 4U;
-    PutU32(frame, o, status->adc_code);           o += 4U;
-    PutU32(frame, o, status->adc_bits);           o += 4U;
-    PutU32(frame, o, status->progress_permille);  o += 4U;
+    PutU32(frame, o, status->stm32_adc_raw12);    o += 4U;
+    PutU32(frame, o, status->stm32_adc_mv);       o += 4U;
 
-    PutI32(frame, o, status->offset_error_uv);    o += 4U;
-    PutI32(frame, o, status->gain_error_ppm);     o += 4U;
-    PutI32(frame, o, status->inl_lsb_x1000);      o += 4U;
-    PutI32(frame, o, status->dnl_lsb_x1000);      o += 4U;
+    PutI32(frame, o, status->offset_error_lsb_x1000); o += 4U;
+    PutI32(frame, o, status->gain_error_lsb_x1000);   o += 4U;
+    PutI32(frame, o, status->gain_error_ppm);         o += 4U;
+    PutI32(frame, o, status->dnl_min_x1000);          o += 4U;
+    PutI32(frame, o, status->dnl_max_x1000);          o += 4U;
+    PutI32(frame, o, status->inl_min_x1000);          o += 4U;
+    PutI32(frame, o, status->inl_max_x1000);          o += 4U;
+    PutU32(frame, o, status->missing_codes);          o += 4U;
 
-    PutU32(frame, o, status->missing_codes);      o += 4U;
-    PutU32(frame, o, status->conversion_time_ns); o += 4U;
+    PutI32(frame, o, status->snr_db_x100);       o += 4U;
+    PutI32(frame, o, status->sinad_db_x100);     o += 4U;
+    PutI32(frame, o, status->enob_x100);         o += 4U;
+    PutI32(frame, o, status->sfdr_db_x100);      o += 4U;
+    PutI32(frame, o, status->thd_db_x100);       o += 4U;
 
     frame[ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN] =
         Checksum8(frame, ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN);
