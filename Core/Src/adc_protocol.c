@@ -1,10 +1,15 @@
 #include "adc_protocol.h"
 
+#include <string.h>
+
 #define ADC_PROTOCOL_MAGIC0 0xA5U
 #define ADC_PROTOCOL_MAGIC1 0x5AU
 #define ADC_PROTOCOL_TYPE_ADC_STATUS 0x10U
-#define ADC_PROTOCOL_PAYLOAD_LEN 112U
-#define ADC_PROTOCOL_HEADER_LEN 4U
+
+#if ADC_PROTOCOL_LOGICAL_FRAME_SIZE != \
+    (ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN + ADC_PROTOCOL_CHECKSUM_LEN)
+#error "ADC protocol logical frame size mismatch"
+#endif
 
 static uint8_t Checksum8(const uint8_t *data, size_t len)
 {
@@ -34,9 +39,11 @@ bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
                                   uint8_t *frame,
                                   size_t frame_len)
 {
-    if ((status == NULL) || (frame == NULL) || (frame_len < ADC_PROTOCOL_FRAME_SIZE)) {
+    if ((status == NULL) || (frame == NULL) || (frame_len < ADC_SPI_TRANSFER_SIZE)) {
         return false;
     }
+
+    memset(frame, 0, ADC_SPI_TRANSFER_SIZE);
 
     frame[0] = ADC_PROTOCOL_MAGIC0;
     frame[1] = ADC_PROTOCOL_MAGIC1;
@@ -82,5 +89,6 @@ bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
     frame[ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN] =
         Checksum8(frame, ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN);
 
+    (void)ADC_PROTOCOL_LOGICAL_FRAME_SIZE;
     return true;
 }
