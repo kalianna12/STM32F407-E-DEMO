@@ -9,7 +9,8 @@ extern "C" {
 #endif
 
 void AdcTestRunner_Init(void);
-bool AdcTestRunner_AcquireSample(AdcTestStatus *status);
+void AdcTestRunner_HandleCommand(const AdcControlCommand *cmd);
+void AdcTestRunner_Task(AdcTestStatus *status);
 
 #ifdef __cplusplus
 }

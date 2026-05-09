@@ -16,6 +16,7 @@ constexpr uint32_t kCsHoldMs = 1;
 
 uint32_t g_tx_error_count = 0;
 uint32_t g_last_tx_tick = 0;
+uint32_t g_last_cmd_seq = 0;
 HAL_StatusTypeDef g_last_spi_status = HAL_OK;
 
 void CsHigh()
@@ -71,6 +72,7 @@ void SpiLink_Init(void)
 
     g_tx_error_count = 0;
     g_last_tx_tick = HAL_GetTick();
+    g_last_cmd_seq = 0;
     g_last_spi_status = HAL_OK;
 
     AdcTestRunner_Init();
@@ -87,10 +89,7 @@ void SpiLink_Task(void)
     g_last_tx_tick = now;
 
     AdcTestStatus status = {};
-    if (!AdcTestRunner_AcquireSample(&status)) {
-        ++g_tx_error_count;
-        return;
-    }
+    AdcTestRunner_Task(&status);
 
     uint8_t tx_frame[ADC_SPI_TRANSFER_SIZE] = {};
     uint8_t rx_frame[ADC_SPI_TRANSFER_SIZE] = {};
@@ -100,5 +99,15 @@ void SpiLink_Task(void)
         return;
     }
 
-    TransferFrame(tx_frame, rx_frame, sizeof(tx_frame));
+    if (!TransferFrame(tx_frame, rx_frame, sizeof(tx_frame))) {
+        return;
+    }
+
+    AdcControlCommand cmd = {};
+    if (AdcProtocol_ParseCommandFrame(rx_frame, sizeof(rx_frame), &cmd)) {
+        if ((cmd.cmd != ADC_TEST_CMD_NONE) && (cmd.seq != g_last_cmd_seq)) {
+            g_last_cmd_seq = cmd.seq;
+            AdcTestRunner_HandleCommand(&cmd);
+        }
+    }
 }

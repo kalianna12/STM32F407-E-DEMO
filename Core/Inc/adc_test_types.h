@@ -12,6 +12,42 @@ extern "C" {
 #define ADC_TEST_FULL_SCALE_MV    3300U
 #define ADC_TEST_DYNAMIC_INVALID  ((int32_t)-2147483647 - 1)
 
+typedef enum {
+    ADC_TEST_STATE_IDLE = 0,
+    ADC_TEST_STATE_SCANNING = 1,
+    ADC_TEST_STATE_CALCULATING = 2,
+    ADC_TEST_STATE_DONE = 3,
+    ADC_TEST_STATE_ERROR = 4,
+    ADC_TEST_STATE_STOPPED = 5
+} AdcTestState;
+
+typedef enum {
+    ADC_TEST_MODE_STATIC_8BIT = 0,
+    ADC_TEST_MODE_STATIC_12BIT = 1,
+    ADC_TEST_MODE_DYNAMIC = 2
+} AdcTestMode;
+
+typedef enum {
+    ADC_TEST_SOURCE_AD9767 = 0,
+    ADC_TEST_SOURCE_STM32_DAC = 1
+} AdcTestSource;
+
+typedef enum {
+    ADC_TEST_CMD_NONE = 0,
+    ADC_TEST_CMD_START = 1,
+    ADC_TEST_CMD_STOP = 2,
+    ADC_TEST_CMD_RESET = 3,
+    ADC_TEST_CMD_SET_MODE = 4,
+    ADC_TEST_CMD_SET_SOURCE = 5
+} AdcTestCommandId;
+
+typedef struct {
+    uint32_t seq;
+    uint32_t cmd;
+    uint32_t arg0;
+    uint32_t arg1;
+} AdcControlCommand;
+
 typedef struct {
     uint32_t state;
     uint32_t mode;

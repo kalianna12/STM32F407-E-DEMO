@@ -5,6 +5,7 @@
 #define ADC_PROTOCOL_MAGIC0 0xA5U
 #define ADC_PROTOCOL_MAGIC1 0x5AU
 #define ADC_PROTOCOL_TYPE_ADC_STATUS 0x10U
+#define ADC_PROTOCOL_TYPE_COMMAND 0x80U
 
 #if ADC_PROTOCOL_LOGICAL_FRAME_SIZE != \
     (ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN + ADC_PROTOCOL_CHECKSUM_LEN)
@@ -33,6 +34,14 @@ static void PutU32(uint8_t *buffer, size_t offset, uint32_t value)
 static void PutI32(uint8_t *buffer, size_t offset, int32_t value)
 {
     PutU32(buffer, offset, (uint32_t)value);
+}
+
+static uint32_t GetU32(const uint8_t *buffer, size_t offset)
+{
+    return ((uint32_t)buffer[offset + 0U]) |
+           ((uint32_t)buffer[offset + 1U] << 8U) |
+           ((uint32_t)buffer[offset + 2U] << 16U) |
+           ((uint32_t)buffer[offset + 3U] << 24U);
 }
 
 bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
@@ -90,5 +99,40 @@ bool AdcProtocol_BuildStatusFrame(const AdcTestStatus *status,
         Checksum8(frame, ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_PAYLOAD_LEN);
 
     (void)ADC_PROTOCOL_LOGICAL_FRAME_SIZE;
+    return true;
+}
+
+bool AdcProtocol_ParseCommandFrame(const uint8_t *frame,
+                                   size_t frame_len,
+                                   AdcControlCommand *cmd)
+{
+    if ((frame == NULL) || (cmd == NULL) || (frame_len < ADC_SPI_TRANSFER_SIZE)) {
+        return false;
+    }
+
+    if ((frame[0] != ADC_PROTOCOL_MAGIC0) || (frame[1] != ADC_PROTOCOL_MAGIC1)) {
+        return false;
+    }
+
+    if ((frame[2] != ADC_PROTOCOL_TYPE_COMMAND) ||
+        (frame[3] != ADC_PROTOCOL_COMMAND_PAYLOAD_LEN)) {
+        return false;
+    }
+
+    const uint8_t expected_checksum =
+        Checksum8(frame, ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_COMMAND_PAYLOAD_LEN);
+    const uint8_t rx_checksum =
+        frame[ADC_PROTOCOL_HEADER_LEN + ADC_PROTOCOL_COMMAND_PAYLOAD_LEN];
+
+    if (rx_checksum != expected_checksum) {
+        return false;
+    }
+
+    size_t o = ADC_PROTOCOL_HEADER_LEN;
+    cmd->seq = GetU32(frame, o);  o += 4U;
+    cmd->cmd = GetU32(frame, o);  o += 4U;
+    cmd->arg0 = GetU32(frame, o); o += 4U;
+    cmd->arg1 = GetU32(frame, o);
+
     return true;
 }
